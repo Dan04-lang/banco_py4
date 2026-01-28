@@ -13,11 +13,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # =============================
-# CONFIGURAÇÕES SEGURAS (ENV)
+# VARIÁVEIS DE AMBIENTE (OBRIGATÓRIAS)
 # =============================
 SECRET_KEY = os.getenv("SECRET_KEY")
 MASTER_KEY = os.getenv("MASTER_KEY")
 DATABASE_URL = os.getenv("DATABASE_URL")
+
+if not SECRET_KEY or not MASTER_KEY or not DATABASE_URL:
+    raise RuntimeError("Variáveis de ambiente não configuradas.")
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
@@ -34,13 +37,13 @@ class UsuarioCreate(BaseModel):
     master_key: str
 
 # =============================
-# BANCO
+# CONEXÃO COM BANCO (RENDER USA SSL)
 # =============================
 def conectar_bd():
-    return psycopg.connect(DATABASE_URL)
+    return psycopg.connect(DATABASE_URL, sslmode="require")
 
 # =============================
-# LIFESPAN
+# LIFESPAN — CRIA TABELAS
 # =============================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -148,7 +151,7 @@ def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]):
     return {"access_token": token, "token_type": "bearer"}
 
 # =============================
-# CRUD ALUNOS
+# CRUD ALUNOS (PROTEGIDO)
 # =============================
 @app.get("/alunos")
 def listar_alunos(user: str = Depends(usuario_logado)):
@@ -163,21 +166,36 @@ def listar_alunos(user: str = Depends(usuario_logado)):
 def criar_aluno(nome: str, semestre: int, curso: str, user: str = Depends(usuario_logado)):
     conn = conectar_bd()
     cur = conn.cursor()
-    cur.execute("INSERT INTO aluno (nome, semestre, curso) VALUES (%s, %s, %s)", (nome, semestre, curso))
+    cur.execute(
+        "INSERT INTO aluno (nome, semestre, curso) VALUES (%s, %s, %s)",
+        (nome, semestre, curso)
+    )
     conn.commit()
     conn.close()
     return {"msg": "Aluno criado"}
 
 @app.put("/alunos/{aluno_id}")
-def atualizar_aluno(aluno_id: int, nome: str = None, semestre: int = None, curso: str = None, user: str = Depends(usuario_logado)):
+def atualizar_aluno(
+    aluno_id: int,
+    nome: str | None = None,
+    semestre: int | None = None,
+    curso: str | None = None,
+    user: str = Depends(usuario_logado)
+):
     conn = conectar_bd()
     cur = conn.cursor()
 
     campos, valores = [], []
 
-    if nome: campos.append("nome=%s"); valores.append(nome)
-    if semestre: campos.append("semestre=%s"); valores.append(semestre)
-    if curso: campos.append("curso=%s"); valores.append(curso)
+    if nome is not None:
+        campos.append("nome=%s")
+        valores.append(nome)
+    if semestre is not None:
+        campos.append("semestre=%s")
+        valores.append(semestre)
+    if curso is not None:
+        campos.append("curso=%s")
+        valores.append(curso)
 
     if not campos:
         raise HTTPException(status_code=400, detail="Nada para atualizar")
